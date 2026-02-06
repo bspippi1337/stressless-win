@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "XSyqbN901pU=",
+  "success": true,
+  "projectFilePath": "C:\\Stressless-win_SCARY\\apps\\windows-wpf\\Stressless.Wpf\\Stressless.Wpf.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\pippi\\.nuget\\packages\\microsoft.web.webview2\\1.0.2739.15\\microsoft.web.webview2.1.0.2739.15.nupkg.sha512"
+  ],
+  "logs": []
+}

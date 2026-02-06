@@ -1,0 +1,4 @@
+WebView2 Runtime
+- This app uses Microsoft Edge WebView2.
+- On most Windows 10/11 systems it is already installed.
+- If missing, install "Microsoft Edge WebView2 Runtime".
