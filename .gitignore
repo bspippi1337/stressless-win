@@ -1,0 +1,20 @@
+# Go
+**/bin/
+**/*.exe
+**/*.dll
+**/*.so
+**/*.dylib
+
+# runtime data
+apps/server-go/data/presets.json
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# build output
+dist/
+
+# Code signing
+stressless_codesign.pfx

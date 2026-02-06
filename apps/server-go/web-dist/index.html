@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Stressless</title>
+  <meta name="theme-color" content="#0A0C10"/>
+  <link rel="icon" type="image/png" href="/favicon-32.png"/>
+  <link rel="stylesheet" href="/ui.css"/>
+</head>
+<body>
+  <div class="app">
+    <aside class="nav">
+      <div class="brand">
+        <div class="mark">S</div>
+        <div class="brandText">
+          <div class="name">Stressless</div>
+          <div class="tag">universal api client • alpha</div>
+        </div>
+      </div>
+
+      <div class="navSection">
+        <div class="navTitle">Workspace</div>
+        <button class="navBtn active" data-view="composer">
+          <span class="dot"></span> Composer
+        </button>
+        <button class="navBtn" data-view="presets">
+          <span class="dot"></span> Presets
+        </button>
+        <button class="navBtn" data-view="discover">
+          <span class="dot"></span> Connect & Discover
+        </button>
+        <button class="navBtn" data-view="about">
+          <span class="dot"></span> About
+        </button>
+      </div>
+
+      <div class="navFooter">
+        <div class="user" id="userBox">
+          <div class="avatar" id="avatar">?</div>
+          <div class="userMeta">
+            <div class="userName" id="userName">Not signed in</div>
+            <div class="userRole" id="userRole">Local mode</div>
+          </div>
+        </div>
+        <button class="btn ghost full" id="btnLogin">Sign in</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="crumbs">
+          <span class="crumb" id="crumb">Composer</span>
+          <span class="sep">/</span>
+          <span class="muted" id="crumbHint">Build requests with confidence</span>
+        </div>
+        <div class="topActions">
+          <button class="btn ghost" id="btnHotkeys">Hotkeys</button>
+          <button class="btn ghost" id="btnNew">New</button>
+          <button class="btn" id="btnSave">Save preset</button>
+          <button class="btn primary" id="btnSend">Send</button>
+        </div>
+      </header>
+
+      <section class="content">
+
+        <!-- Composer -->
+        <div class="view" id="view-composer">
+          <div class="grid">
+            <div class="panel">
+              <div class="panelHead">
+                <div>
+                  <div class="panelTitle">Request</div>
+                  <div class="panelSub">Method, URL, auth, headers, body</div>
+                </div>
+                <div class="panelTools">
+                  <select id="method" class="select compact">
+                    <option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>HEAD</option><option>OPTIONS</option>
+                  </select>
+                </div>
+              </div>
+
+              <div class="field">
+                <label>URL</label>
+                <input id="url" class="input" value="https://api.openai.com/v1/models" placeholder="https://api.example.com/v1/..." />
+              </div>
+
+              <div class="split">
+                <div class="field">
+                  <label>Auth</label>
+                  <select id="authMode" class="select">
+                    <option value="none">None</option>
+                    <option value="bearer">Bearer token</option>
+                    <option value="header">Custom header</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Header name</label>
+                  <input id="authKey" class="input" value="X-API-Key" />
+                </div>
+              </div>
+
+              <div class="field">
+                <label>Token / value</label>
+                <input id="authValue" class="input" placeholder="Paste token here (not saved unless you choose)" />
+              </div>
+
+              <div class="field">
+                <div class="row between">
+                  <label>Headers</label>
+                  <button class="btn ghost compact" id="btnAddHeader">+ Add</button>
+                </div>
+                <div id="headers" class="kv"></div>
+              </div>
+
+              <div class="field">
+                <label>Body</label>
+                <textarea id="body" class="textarea" placeholder='{"hello":"world"}'></textarea>
+                <div class="hint">Body is sent only for non-GET/HEAD.</div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panelHead">
+                <div>
+                  <div class="panelTitle">Response</div>
+                  <div class="panelSub" id="respMeta">Ready</div>
+                </div>
+                <div class="panelTools">
+                  <button class="btn ghost compact" id="btnCopyBody">Copy body</button>
+                </div>
+              </div>
+
+              <div class="tabs">
+                <button class="tab active" data-tab="body">Body</button>
+                <button class="tab" data-tab="headers">Headers</button>
+                <button class="tab" data-tab="raw">Raw</button>
+              </div>
+
+              <div class="tabBody" id="tab-body">
+                <pre class="code" id="respBody"></pre>
+              </div>
+              <div class="tabBody hidden" id="tab-headers">
+                <pre class="code" id="respHeaders"></pre>
+              </div>
+              <div class="tabBody hidden" id="tab-raw">
+                <pre class="code" id="respRaw"></pre>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Presets -->
+        <div class="view hidden" id="view-presets">
+          <div class="panel">
+            <div class="panelHead">
+              <div>
+                <div class="panelTitle">Presets</div>
+                <div class="panelSub">Saved request blueprints (local JSON on disk)</div>
+              </div>
+              <div class="panelTools">
+                <button class="btn ghost compact" id="btnRefreshPresets">Refresh</button>
+              </div>
+            </div>
+            <div class="presetList" id="presetList"></div>
+          </div>
+        </div>
+
+        <!-- Discover -->
+        <div class="view hidden" id="view-discover">
+          <div class="panel">
+            <div class="panelHead">
+              <div>
+                <div class="panelTitle">Connect & Discover</div>
+                <div class="panelSub">SSE-powered hints: docs, base URL, auth style, OpenAPI</div>
+              </div>
+            </div>
+
+            <div class="split">
+              <div class="field">
+                <label>Domain / URL</label>
+                <input id="discoverTarget" class="input" value="openai.com" />
+              </div>
+              <div class="field">
+                <label>Controls</label>
+                <div class="row">
+                  <button class="btn primary" id="btnDiscoverStart">Start</button>
+                  <button class="btn danger" id="btnDiscoverStop">Stop</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="chips" id="chips"></div>
+            <div class="feed" id="discoverFeed"></div>
+          </div>
+        </div>
+
+        <!-- About -->
+        <div class="view hidden" id="view-about">
+          <div class="panel">
+            <div class="panelHead">
+              <div>
+                <div class="panelTitle">About</div>
+                <div class="panelSub">This is an alpha. The goal is serious: reliable, elegant API work.</div>
+              </div>
+            </div>
+            <div class="aboutGrid">
+              <div class="aboutCard">
+                <div class="aboutTitle">Design language</div>
+                <div class="aboutText">Clean grid, careful contrast, quiet confidence. A UI that feels like a tool, not a toy.</div>
+              </div>
+              <div class="aboutCard">
+                <div class="aboutTitle">Safety</div>
+                <div class="aboutText">Presets are local. Secrets are yours. Git ignores presets by default.</div>
+              </div>
+              <div class="aboutCard">
+                <div class="aboutTitle">Clippy module</div>
+                <div class="aboutText">A helpful assistant panel can provide suggestions based on context and discovery events (alpha).</div>
+              </div>
+              <div class="aboutCard">
+                <div class="aboutTitle">Next</div>
+                <div class="aboutText">OpenAPI import, environments, request history, encrypted vault, replay + diff.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Assistant panel -->
+        <aside class="assistant">
+          <div class="assistantHead">
+            <div class="assistantTitle">Assistant</div>
+            <div class="assistantSub" id="assistantMood">High-focus mode</div>
+          </div>
+          <div class="assistantBody" id="assistantBody"></div>
+          <div class="assistantFoot">
+            <input class="input compact" id="assistantInput" placeholder="Ask for a tip (alpha)..." />
+            <button class="btn compact" id="assistantSend">Send</button>
+          </div>
+        </aside>
+
+      </section>
+    </main>
+  </div>
+
+  <div class="modal hidden" id="modalHotkeys">
+    <div class="modalCard">
+      <div class="modalHead">
+        <div>
+          <div class="panelTitle">Hotkeys</div>
+          <div class="panelSub">Because serious tools respect your fingers.</div>
+        </div>
+        <button class="btn ghost compact" id="btnCloseHotkeys">Close</button>
+      </div>
+      <div class="hotkeys">
+        <div class="hk"><kbd>Ctrl</kbd> + <kbd>Enter</kbd><span>Send request</span></div>
+        <div class="hk"><kbd>Ctrl</kbd> + <kbd>S</kbd><span>Save preset</span></div>
+        <div class="hk"><kbd>Ctrl</kbd> + <kbd>K</kbd><span>Connect & Discover</span></div>
+        <div class="hk"><kbd>Esc</kbd><span>Close modal</span></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/ui.js"></script>
+</body>
+</html>
