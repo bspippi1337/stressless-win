@@ -1,0 +1,346 @@
+name: Unified Release (Win + Linux + macOS + Android)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  go_binaries:
+    name: Go engine (Linux/macOS + Windows zip)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            pack: run
+          - goos: linux
+            goarch: arm64
+            pack: run
+          - goos: darwin
+            goarch: amd64
+            pack: tar
+          - goos: darwin
+            goarch: arm64
+            pack: tar
+          - goos: windows
+            goarch: amd64
+            pack: zip
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: false
+
+      - name: Build engine
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          test -d apps/server-go || (echo "❌ Missing apps/server-go" && exit 1)
+          cd apps/server-go
+          test -f go.mod || (echo "❌ Missing apps/server-go/go.mod" && exit 1)
+
+          mkdir -p ../../dist/engine/${GOOS}-${GOARCH}
+          OUT="stressless-engine"
+          if [ "$GOOS" = "windows" ]; then OUT="${OUT}.exe"; fi
+
+          go test ./... || true
+          go build -trimpath -ldflags "-s -w" -o "../../dist/engine/${GOOS}-${GOARCH}/${OUT}" ./cmd/server
+
+      - name: Package engine
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/assets
+          GOOS="${{ matrix.goos }}"
+          GOARCH="${{ matrix.goarch }}"
+          SRC="dist/engine/${GOOS}-${GOARCH}"
+
+          if [ "${{ matrix.pack }}" = "run" ]; then
+            sudo apt-get update -y
+            sudo apt-get install -y makeself
+            rm -rf payload && mkdir -p payload
+            cp "${SRC}/stressless-engine" payload/stressless-engine
+            chmod +x payload/stressless-engine
+            cat > payload/run.sh <<'SH'
+            #!/usr/bin/env sh
+            set -eu
+            HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+            exec "$HERE/stressless-engine" "$@"
+            SH
+            chmod +x payload/run.sh
+            makeself --notemp payload "dist/assets/stressless-engine-${GOOS}-${GOARCH}.run" "stressless-engine" ./run.sh
+          elif [ "${{ matrix.pack }}" = "tar" ]; then
+            tar -czf "dist/assets/stressless-engine-${GOOS}-${GOARCH}.tar.gz" -C "${SRC}" .
+          else
+            (cd "${SRC}" && zip -r "../../../assets/stressless-engine-${GOOS}-${GOARCH}.zip" .)
+          fi
+
+      - name: Upload assets artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-assets-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/assets/*
+
+  windows_installer:
+    name: Windows Installer (WPF + engine) — auto
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: false
+
+      - name: Build WPF UI (Release)
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          dotnet restore apps/windows-wpf
+          dotnet build apps/windows-wpf -c Release -o dist/ui
+
+      - name: Build Go engine (Windows exe)
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          cd apps/server-go
+          go build -trimpath -ldflags "-s -w" -o ..\..\dist\ui\stressless-engine.exe .\cmd\server
+
+      - name: Ensure Inno Setup script exists (auto-generate)
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+
+          $issPath = "installer\installer.iss"
+          if (!(Test-Path $issPath)) {
+            New-Item -ItemType Directory -Force -Path "installer" | Out-Null
+
+            # Version from tag: refs/tags/v1.2.3 -> 1.2.3
+            $tag = "${{ github.ref_name }}"
+            $ver = $tag.TrimStart("v")
+            if ([string]::IsNullOrWhiteSpace($ver)) { $ver = "0.0.0" }
+
+            @"
+#define MyAppName "Stressless"
+#define MyAppVersion "$ver"
+#define MyAppExeName "Stressless.Wpf.exe"
+
+[Setup]
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+DefaultDirName={pf}\{#MyAppName}
+DisableProgramGroupPage=yes
+OutputDir=dist\installer
+OutputBaseFilename=stressless-installer
+Compression=lzma
+SolidCompression=yes
+ArchitecturesInstallIn64BitMode=x64
+PrivilegesRequired=lowest
+
+[Files]
+Source: "..\dist\ui\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "..\dist\ui\stressless-engine.exe"; DestDir: "{app}"; Flags: ignoreversion
+
+[Icons]
+Name: "{group}\Stressless"; Filename: "{app}\{#MyAppExeName}"
+Name: "{userdesktop}\Stressless"; Filename: "{app}\{#MyAppExeName}"
+
+[Run]
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch Stressless"; Flags: nowait postinstall skipifsilent
+"@ | Set-Content -Path $issPath -Encoding UTF8
+
+            Write-Host "🪄 Generated $issPath"
+          } else {
+            Write-Host "✅ Found $issPath"
+          }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y
+
+      - name: Build installer EXE
+        shell: pwsh
+        run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = "Stop"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\installer.iss
+
+      - name: Upload Windows installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/installer/*.exe
+
+  android_apk:
+    name: Android APK (always + auto-sign)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java (Android)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install MAUI Android workload
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet workload install maui-android
+
+      - name: Ensure Android app exists (auto-scaffold)
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_DIR="apps/android-maui/Stressless.Mobile"
+          CSPROJ="$APP_DIR/Stressless.Mobile.csproj"
+
+          if [ -f "$CSPROJ" ]; then
+            echo "✅ Android project exists"
+            exit 0
+          fi
+
+          echo "🪄 Missing Android project. Scaffolding minimal MAUI Blazor Hybrid app..."
+          mkdir -p apps/android-maui
+          pushd apps/android-maui
+          dotnet new maui-blazor -n Stressless.Mobile
+          popd
+
+          # Tiny life sign
+          if [ -f "$APP_DIR/Pages/Index.razor" ]; then
+            sed -i 's/Welcome to your new app/Welcome to Stressless Mobile (auto-built)/g' "$APP_DIR/Pages/Index.razor" || true
+          fi
+
+      - name: Prepare signing (stable if secrets exist, else auto)
+        id: sign
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p signing
+          KEYSTORE="signing/release.keystore"
+
+          if [ -n "${ANDROID_KEYSTORE_B64:-}" ] && [ -n "${ANDROID_KEYSTORE_PASSWORD:-}" ] && [ -n "${ANDROID_KEY_ALIAS:-}" ] && [ -n "${ANDROID_KEY_PASSWORD:-}" ]; then
+            echo "✅ Using provided keystore secrets (stable signing)"
+            echo "${ANDROID_KEYSTORE_B64}" | base64 -d > "${KEYSTORE}"
+            echo "keystore=${KEYSTORE}" >> "$GITHUB_OUTPUT"
+            echo "storepass=${ANDROID_KEYSTORE_PASSWORD}" >> "$GITHUB_OUTPUT"
+            echo "alias=${ANDROID_KEY_ALIAS}" >> "$GITHUB_OUTPUT"
+            echo "keypass=${ANDROID_KEY_PASSWORD}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "🪄 No secrets found. Generating ephemeral keystore (signs APK, but upgrades require reinstall)."
+          # random-ish passwords
+          STOREPASS="$(openssl rand -hex 16)"
+          KEYPASS="$(openssl rand -hex 16)"
+          ALIAS="stressless"
+
+          keytool -genkeypair -v \
+            -keystore "${KEYSTORE}" \
+            -storepass "${STOREPASS}" \
+            -keypass "${KEYPASS}" \
+            -alias "${ALIAS}" \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Stressless Auto, OU=Build, O=Stressless, L=Oslo, S=NO, C=NO"
+
+          echo "keystore=${KEYSTORE}" >> "$GITHUB_OUTPUT"
+          echo "storepass=${STOREPASS}" >> "$GITHUB_OUTPUT"
+          echo "alias=${ALIAS}" >> "$GITHUB_OUTPUT"
+          echo "keypass=${KEYPASS}" >> "$GITHUB_OUTPUT"
+
+      - name: Build signed APK (Release)
+        shell: bash
+        working-directory: apps/android-maui/Stressless.Mobile
+        run: |
+          set -euo pipefail
+          dotnet restore
+
+          dotnet publish -c Release -f net8.0-android \
+            /p:AndroidPackageFormat=apk \
+            /p:AndroidKeyStore=true \
+            /p:AndroidSigningKeyStore="${{ steps.sign.outputs.keystore }}" \
+            /p:AndroidSigningStorePass="${{ steps.sign.outputs.storepass }}" \
+            /p:AndroidSigningKeyAlias="${{ steps.sign.outputs.alias }}" \
+            /p:AndroidSigningKeyPass="${{ steps.sign.outputs.keypass }}"
+
+      - name: Collect APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/android
+          find apps/android-maui/Stressless.Mobile -type f -name "*.apk" -print -exec cp -f {} dist/android/ \;
+          ls -lah dist/android
+          test -n "$(ls -1 dist/android/*.apk 2>/dev/null || true)" || (echo "❌ No APK produced" && exit 1)
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: dist/android/*.apk
+
+  release:
+    name: Publish GitHub Release (all assets)
+    needs: [go_binaries, windows_installer, android_apk]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Flatten assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          find release-assets -type f -maxdepth 6 -print -exec cp -f {} out/ \;
+          ls -lah out
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
