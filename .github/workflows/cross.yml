@@ -1,0 +1,115 @@
+name: Cross-build & Release
+
+on:
+  push:
+    branches: ["master"]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+          - goos: darwin
+            goarch: amd64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          cache: false
+
+      - name: Prepare build (ensure module)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -f go.mod ] && [ -d cmd/uac ]; then
+            go mod init github.com/bspippi1337/stressless-win || true
+            go mod tidy || true
+          fi
+
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/${GOOS}-${GOARCH}
+          OUT=restless
+          if [ "${GOOS}" = "windows" ]; then OUT="${OUT}.exe"; fi
+          go build -trimpath -ldflags="-s -w" -o "dist/${GOOS}-${GOARCH}/${OUT}" ./cmd/uac
+
+      - name: Package artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          if [[ "${{ matrix.goos }}" == "linux" ]]; then
+            # create self-extracting .run using makeself (install in runner)
+            sudo apt-get update -y
+            sudo apt-get install -y makeself
+            mkdir -p payload
+            cp dist/linux-${{ matrix.goarch }}/restless payload/restless
+            chmod +x payload/restless
+            cat > payload/run.sh <<'SH'
+            #!/usr/bin/env sh
+            HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+            exec "$HERE/restless" "$@"
+            SH
+            chmod +x payload/run.sh
+            makeself --notemp payload artifacts/restless-linux-${{ matrix.goarch }}.run "restless" ./run.sh
+            rm -rf payload
+          elif [[ "${{ matrix.goos }}" == "windows" ]]; then
+            pushd dist/windows-${{ matrix.goarch }}
+            zip -r ../../artifacts/restless-windows-${{ matrix.goarch }}.zip *
+            popd
+          elif [[ "${{ matrix.goos }}" == "darwin" ]]; then
+            tar -czf artifacts/restless-darwin-${{ matrix.goarch }}.tar.gz -C dist/darwin-${{ matrix.goarch }} .
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: restless-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: artifacts/*
+
+  build-and-push-image:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref != 'refs/heads/feature/ci' # example guard
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and push Docker image (ghcr)
+        uses: docker/build-push-action@v5
+        with:
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/stressless:latest
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            GO_BUILD_OUTPUT=./cmd/uac
+
+      - name: Create release on tag
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
