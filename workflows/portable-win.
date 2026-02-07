@@ -1,0 +1,53 @@
+name: Portable (Windows)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  portable:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      # Optional: build Go engine first if you have it
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+          cache: true
+
+      - name: Build Go (optional)
+        shell: pwsh
+        run: |
+          if (Test-Path "apps/server-go") {
+            Push-Location apps/server-go
+            go test ./...
+            go build -o ..\..\apps\windows-wpf\Stressless.Wpf\bin\engine\stressless-engine.exe .\cmd\server
+            Pop-Location
+          } else {
+            Write-Host "apps/server-go not found, skipping"
+          }
+
+      - name: Publish WPF portable
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          dotnet publish .\apps\windows-wpf\Stressless.Wpf\Stressless.Wpf.csproj `
+            -c Release -r win-x64 `
+            --self-contained true `
+            /p:PublishSingleFile=true `
+            /p:IncludeNativeLibrariesForSelfExtract=true `
+            -o .\dist\stressless-win-portable
+
+      - name: Zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path .\dist\stressless-win-portable\* -DestinationPath .\dist\stressless-win-portable.zip -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stressless-win-portable
+          path: dist/stressless-win-portable.zip
